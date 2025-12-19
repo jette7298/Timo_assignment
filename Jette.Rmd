@@ -1,0 +1,85 @@
+---
+title: "Assignment"
+author: "Jette"
+date: "2025-12-18"
+output: html_document
+---
+```{r, echo = FALSE}
+#libraries
+library(tidyverse)
+library(psych)
+library(effectsize)
+library(car)
+```
+```{r}
+#read data
+music_data <- read_csv("SDA/ANOVA/music_data.csv")
+#View(music_data)
+```
+
+
+```{r}
+#inspecting the dataset
+
+colnames(music_data)
+str(music_data)
+table(music_data$condition)
+p <- ggplot(music_data, aes(y = productivity, x = condition))+
+    geom_violin()
+p
+
+
+# are there NAs?
+summary(music_data)
+
+music_data %>% 
+  group_by(condition) %>% 
+  summarise(avg = mean(productivity), median(productivity), sd(productivity))
+  
+  
+
+```
+
+```{r}
+#anova
+
+anova <- aov(productivity ~ condition, data = music_data)
+summary(anova)
+
+
+```
+We see significance so lets perform a post-hoc
+
+```{r}
+TukeyHSD(anova)
+```
+
+So we see that the first 2 comparisons are significant, the third is not.
+Lets look also at the effect size
+
+```{r}
+effectsize(anova)
+
+
+#pairwise cohens d
+# no music and music choice
+effectsize::t_to_d(t.test(productivity ~ condition, data = filter(music_data, condition %in% c("0","2")))$statistic,
+                   t.test(productivity ~ condition, data = filter(music_data, condition %in% c("0","2")))$parameter)
+
+
+# no music choice and music choice
+effectsize::t_to_d(t.test(productivity ~ condition, data = filter(music_data, condition %in% c("1","2")))$statistic,
+                   t.test(productivity ~ condition, data = filter(music_data, condition %in% c("1","2")))$parameter)
+
+```
+```{r}
+#assumptions ANOVA
+# normality
+shapiro.test(residuals(anova))
+qqnorm(residuals(anova)); qqline(residuals(anova))
+
+
+# homogeneity of variance
+leveneTest(productivity ~ condition, data = music_data)
+```
+
