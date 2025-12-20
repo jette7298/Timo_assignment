@@ -1,0 +1,128 @@
+---
+title: "Jette_regression"
+output: html_document
+---
+
+For this analysis we will investigate the support for government climate change policy.
+The main predictor are negetaive emotions about the impact of global warnings. Hoewver, also some other variables are gonna b controlled for, namely
+- egalitarianism
+- individualism
+
+It is hypothesized, that the general cultural worldview (egalitarianism vs. individualism) influences subjective perception of negative emotions.
+
+All variables, are continuous and measured on a 1-7 Likert scale. As we want to predict one continuous variable (support for government climate change policy) from multiple continuous variables (negative emotions, egalitarianism, individualism), we will use a multiple linear regression model.
+
+```{r, message=FALSE, warning=FALSE}}
+#libraries
+library(tidyverse)
+library(apaTables)
+library(car)
+```
+
+Lets load in the data
+
+```{r}
+climate_data <- read_csv("SDA/Regression/climate_data.csv")
+head(climate_data)
+```
+We also have age and gender as sociodemographic information
+
+Lets first get dome descripitve statiscts
+
+```{r}
+summary(climate_data)
+```
+And now lets plot the main variables
+```{r}
+climate_data %>%
+  select(gov_support, neg_emotion, egal, indv) %>%
+  tidyr::pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = "", y = value)) +
+  geom_violin() +
+  facet_wrap(~variable, scales = "free_y")
+
+```
+We see some skewness here, but now massive ceiling or floor effects or outliers. So we can proceed with the regression analysis.
+
+Not sure, if you have to do this, but lets also perform a correlation analysis to see how the variables are related to each other
+
+```{r}
+
+climate_data %>%
+  select(gov_support, neg_emotion, egal, indv) %>%
+  mutate(across(everything(), as.numeric)) %>%   # important if Likert/factors
+  apa.cor.table(
+    filename = "correlation_table_regression.doc")
+```
+
+Now we continue with checking the assumptions
+1. Linearity, will check with residual plots
+2. Absence of multicollinearity, will check with VIF
+3. Homoscedasticity, will check with residual plots
+4. Normality of residuals, will check with Q-Q plot
+5. Absence of influential cases, will check with Cook's distance
+6. Independence of residuals, will check with Durbin-Watson test
+7. Independence of observations, will assume this is given
+
+```{r}
+#this is the model we are testing
+model <- lm(gov_support ~ neg_emotion + egal + indv, data = climate_data)
+
+# plots
+par(mfrow = c(2, 2))
+plot(model)
+```
+Residual vs fitted: points should be randomly distributed around 0 line, which they are, so linearity and homoscedasticity seem to be given
+
+Normal Q-Q: points should fall roughly along the diagonal line, which they do, so normality of residuals seems to be given
+
+Scale-Location: Horizontal line with equally spread points is a good indication of homoscedasticity, which they only kind of are, so homoscedasticity could be a problem
+
+Residuals vs Leverage: No points outside of the Cook's distance lines, so no influential cases seem to be present
+
+We can now also check those assumptions more formally
+
+```{r}
+#VIF
+vif(model)
+
+#Durbin-Watson test
+durbinWatsonTest(model)
+
+#nvc test
+ncvTest(model)
+
+```
+For the VIF everything is below 5, so no multicollinearity is present.
+
+p-value of Durbin-Watson test is above .05, so we can assume independence of residuals. (It tests that the errors are not auto-correlated with themselves (they are independent))
+
+nvc: Non-constant variance score test, p-value is below .05. H0 is there is constant variance,so we have heteroscedasticity. This is a problem for the regression analysis, as it can lead to biased standard errors and thus incorrect conclusions about the significance of predictors.
+
+To conclude, all but one assumption seem to be met. Heteroscedasticity is a problem, so we will use robust standard errors in the regression analysis to account for this.
+
+Let's build our model step by step to be sure about the impact of all the predictors. That means the first model is just a simple regression with negative emotions as predictor, then we add egalitarianism and fianlly individualism.
+
+```{r}
+#model 1
+model1 <- lm(gov_support ~ neg_emotion, data = climate_data)
+summary(model1)
+
+#model 2
+model2 <- lm(gov_support ~ neg_emotion + egal, data = climate_data)
+summary(model2)
+
+#model 3
+model3 <- lm(gov_support ~ neg_emotion + egal + indv, data = climate_data)
+summary(model3)
+```
+Now we also add age and gender to model 3
+
+```{r}
+#model 4
+model4 <- lm(gov_support ~ neg_emotion + egal + indv + age + gender, data = climate_data)
+summary(model4)
+```
+Negative emotions significantly predicted government support in the bivariate model (b = 0.18, p = .004), but this effect became non-significant once value orientations were included. Across all multivariate models, egalitarian values consistently emerged as a significant positive predictor of government support (bs ≈ 0.31–0.34, ps < .01). Individualistic values did not predict government support.
+
+In the full model controlling for age and gender, egalitarianism remained significant (b = 0.31, p = .007), while negative emotions and individualism remained non-significant. Age was negatively associated with government support (b = −0.13, p = .042), indicating slightly lower support among older respondents, whereas gender showed only a marginal effect (p = .08). Overall explained variance increased modestly in the full model (R² = .12).
