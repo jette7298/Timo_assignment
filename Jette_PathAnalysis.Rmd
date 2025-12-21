@@ -1,0 +1,313 @@
+---
+title: "Jette_PathAnalysis"
+output: html_document
+---
+
+For this task the efect of openness on SWB is investigated. It is hypothesized, that this effect is mediated by self-compassion. It shall be investigated, if self-compassion is fully or partially mediating this relationship.
+
+The constructs are all measured on a continuous scale ranging from 1 to 7. As they use the same scale there is no need to standardize them.
+
+```{r, message=FALSE, warning=FALSE}
+#libraries
+library(tidyverse)
+library(lavaan)
+library(semPlot)
+library(psych)
+library(apaTables)
+library(mice)
+library(MoEClust)
+library(performance)
+library(see)
+```
+Lets load in the data
+```{r}
+college <- read_csv("SDA/Path Analysis/college.csv")
+head(college)
+```
+We also have gender and age. However, we are gonna start of with calculting the some scores. Therefor we also first check chronbachs alpha, to check weather the scales have internal reliability. Firstly lets build lists with the scales
+
+```{r}
+
+#openess scale
+openess_items <- college %>%
+  select(starts_with('open'))
+
+#seld-compassion
+sc_items <- college %>%
+  select(starts_with('sc'))
+
+#SWB
+swb_items <- college %>%
+  select(starts_with('swb'))
+```
+
+now first check some statistics per scale and visualize the distribution and also compute chronbachs alpha
+
+```{r}
+#openess
+summary(openess_items)
+psych::alpha(openess_items)
+openess_items %>%
+  pivot_longer(everything(), names_to = "item", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~item, scales = "free_y")
+```
+Means are somewhat similar. They are all slightly left skewed. Chronbachs alpha is .91, which is very good.
+
+Now for self-compassion
+
+```{r}
+#self-compassion
+summary(sc_items)
+psych::alpha(sc_items)
+sc_items %>%
+  pivot_longer(everything(), names_to = "item", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~item, scales = "free_y")
+```
+again, all means are similar, slightly left skewed. Chronbachs alpha is .86, which is also good.
+
+Now lastly sWB
+
+```{r}
+
+#SWB
+summary(swb_items)
+psych::alpha(swb_items)
+swb_items %>%
+  pivot_longer(everything(), names_to = "item", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(binwidth = 1) +
+  facet_wrap(~item, scales = "free_y")
+```
+These are a bit more different in terms of distribution. Also left skewed, chronbachs alpha is .65 which is theoretically not acceptable, but the scales is already formed out of only 3 items, so we will proceed with it. Checking the wording of the items and the histogram confirms, that they are not inverted. We will just keep this in mind as a limitation for the final interpretation
+
+Now we can compute the scale scores by taking the mean of the items
+
+```{r}
+college <- college %>%
+  mutate(
+    meanopen = rowMeans(openess_items, na.rm = TRUE),
+    meansc = rowMeans(sc_items, na.rm = TRUE),
+    meanswb = rowMeans(swb_items, na.rm = TRUE)
+  )
+```
+
+Now we can check the correlations between the main variables
+
+```{r}
+
+college %>%
+  select(meanopen, meansc, meanswb) %>%
+  cor()
+
+#if you want to the next lines give a nice APA table in word in your wd again
+# college %>%
+#   select(meanopen, meansc, meanswb) %>%
+#   apa.cor.table(
+#     filename = "correlation_table_pathanalysis.doc")
+```
+
+Now we can do the path analysis. This is basically an extension of regression analysis, so the same assumptions apply. We can check them with a regression model first
+
+these are the assumption according to your tutorial:
+All causal relationships between variables must go in one direction only (you cannot have a pair of variables that cause each other).
+
+The variables must have a clear time-ordering since one variable cannot be said to cause another unless it precedes it in time.
+
+The path model variables share linear relationships and don’t interact with each other (linearity).
+
+Residuals (i.e., prediction errors) aren’t correlated with predictor variables (independence) or each other (normality), and residuals have constant variance across values of your predictor variables (equality of variance).
+
+Measurements are valid and reliable. We can account for invalidity and unreliability in structural equation modeling, but not path analysis.
+
+The path model accounts for all relevant influences on the variables included. All models are wrong, but how wrong is yours?
+
+i think you dealt with outliers really unnecessarily complicated, but lets to it anyway I guess
+
+```{r}
+md.pattern(college) #great, no missing data, but I already new that from doing summary()
+```
+You then standardized the data and looked for outliers. As explained before, standardizing is unnecessary in this case and will just make interpretation harder, so lets not do that.
+
+Outliers. (YOu did that using z-scores, I do basically the same here, just without converting to z-scores first)
+
+```{r}
+
+remove_iqr_outliers <- function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  x >= (q1 - 1.5 * iqr) & x <= (q3 + 1.5 * iqr)
+}
+
+college_clean <- college %>%
+  filter(
+    remove_iqr_outliers(meanopen),
+    remove_iqr_outliers(meansc),
+    remove_iqr_outliers(meanswb)
+  )
+
+
+```
+6 observations did actually get removed. Now we have to check for multivariate outliers. For that we can use the Mahalanobis distance
+
+```{r}
+linear_model <- lm(meanswb ~ meanopen + meansc, data = college_clean)
+
+#save residuals
+college_clean$res <- - college_clean$meanswb - predict(linear_model) 
+
+#save mahalanobis distance
+college_clean$mahal <- MoE_mahala(linear_model, college_clean$res)
+
+college_clean$mahal
+#critical value for chi-squared distribution with 2 df (number of predictors) at alpha .001 is 12.77
+
+#remove multivariate outliers
+college_clean <- college_clean %>%
+  filter(mahal < 12.77)
+
+#some more vars got removed
+```
+
+Now lets quickly check the visuals for the model assumptions using the performance function
+
+```{r}
+check_model(linear_model)
+```
+Visually all assumptions are met.Then correlations follow, I already did this above.
+
+Nowe we are building path models in lavaan
+
+```{r}
+#specify the model
+mediation_model <- '
+  # a path (IV → Mediator)
+  meansc  ~ a*meanopen
+
+  # b path (Mediator → DV)
+  meanswb ~ b*meansc
+
+  # c′ path (Direct effect: IV → DV controlling for mediator)
+  meanswb ~ c_prime*meanopen
+
+  # indirect effect (a × b)
+  indirect := a*b
+
+  # total effect (c = c′ + ab)
+  total := c_prime + (a*b)
+'
+#fit the model
+just_model <- sem(
+  mediation_model,
+  data = college_clean,
+  se = "bootstrap",
+  bootstrap = 100
+)
+
+summary(just_model, fit.measures=TRUE, standardized=TRUE, ci=TRUE)
+
+#plot the model
+semPaths(just_model, "std", 
+         whatLabels = "std",
+         edge.label.cex = 1.2,
+         sizeMan = 8,
+         sizeLat = 8,
+         nCharNodes = 0,
+         layout = "tree",
+         style = "lisrel",
+         residuals = FALSE)
+
+```
+
+A simple mediation model was estimated to examine whether meansc mediates the relationship between meanopen and meanswb (N = 191). As expected, meanopen was positively associated with meansc (a-path: b = 0.37, p < .001). In turn, meansc was positively related to meanswb when controlling for meanopen (b-path: b = 0.25, p = .015).
+
+The direct effect of meanopen on meanswb (c′-path) was not significant (b = 0.05, p = .36). However, the indirect effect via meansc was significant (ab = 0.09, 95% CI [0.01, 0.17]), indicating mediation. The total effect of meanopen on meanswb was also significant (b = 0.14, p = .005).
+
+Overall, the results suggest that the association between meanopen and meanswb is primarily explained through meansc, consistent with an indirect-only mediation pattern.
+
+(And we also see that interpretation in the plot.)
+
+Now lets dive in a bit deeper
+
+```{r}
+
+# request bootstrap confidence intervals
+parameterestimates(just_model, boot.ci.type = "perc", standardized = TRUE)
+```
+The a-path from meanopen to meansc was positive and significant (b = 0.37, SE = 0.04, z = 8.38, p < .001), indicating that higher openness was associated with higher meansc. The b-path from meansc to meanswb was also positive and significant (b = 0.25, SE = 0.10, z = 2.44, p = .015), controlling for meanopen.
+
+In contrast, the direct effect (c′) of meanopen on meanswb was small and not significant (b = 0.05, p = .36). However, the indirect effect via meansc was significant (ab = 0.09, 95% CI [0.01, 0.17]), indicating mediation. The total effect of meanopen on meanswb was significant (b = 0.14, p = .005).
+
+Overall, these results suggest an indirect-only mediation, where the association between meanopen and meanswb operates primarily through meansc rather than via a direct pathway.
+
+```{r}
+# alternative plot which your prof used
+
+semPaths(just_model, "par", 
+         sizeMan = 15, 
+         sizeInt = 15,
+         sizeLat = 15,
+         edge.label.cex=1.5,
+         fade=FALSE)
+```
+Now we are building an overidientief model
+
+```{r}
+mediation_model2 <- "
+  # a path (IV → Mediator)
+  meansc ~ a * meanopen
+
+  # b path (Mediator → DV)
+  meanswb ~ b * meansc
+
+  # indirect effect
+  indirect := a * b
+"
+
+# fit it
+over_model <- sem(mediation_model2, data = college_clean, se = "bootstrap", bootstrap = 100)
+
+summary(over_model, fit.measures=TRUE, standardized=TRUE, ci=TRUE)
+
+```
+n this output, only paths a and b are estimated in the path model (i.e., meanopen → meansc and meansc → meanswb). For this reason, the b path and the indirect effect (ab) differ slightly from what was estimated in the just-identified model, because the direct path from meanopen to meanswb is not included here.
+
+The lack of a c′ path has another implication: without this additional path, the model has fewer free parameters and cannot perfectly reproduce the observed correlations. That means the model-implied correlation matrix will differ from the actual correlation matrix, creating some discrepancy. This is precisely why overidentified models do not have perfect fit (i.e., fit indices will not necessarily be exactly CFI/TLI = 1 and RMSEA/SRMR = 0). The key question is therefore: how large is the discrepancy?
+
+Using the usual fit rules of thumb (CFI/TLI > .90 and RMSEA/SRMR < .10), we can see that this model fits the data very well. Specifically, the chi-square test is non-significant, χ²(1) = 0.49, p = .48, and the approximate fit indices are excellent (CFI = 1.00, TLI = 1.02, RMSEA = .00, SRMR = .02). In other words, the model-implied correlations closely approximate the observed correlations, and the discrepancy is negligible.
+
+Looking at the path estimates, the a path from meanopen to meansc is positive and significant (b = 0.37, p < .001), and the b path from meansc to meanswb is also positive and significant (b = 0.29, p = .001). The indirect effect is significant as well (ab = 0.11, 95% CI [0.05, 0.18]), supporting mediation via meansc.
+
+Because the excluded direct path (c′) was small and non-significant in the just-identified model, omitting it here should have little influence on the implied correlation matrix. In the interest of parsimony, it therefore makes sense to leave it out: the c′ path does not appear to be needed.
+
+That is why we now also look at covariances
+
+```{r}
+# observed covariance matrix from the data
+cov(as.matrix(college_clean[, c("meanswb", "meansc", "meanopen")]))
+
+# model-implied covariance matrix
+fitted(over_model)
+
+#calling parameter estimates
+parameterestimates(over_model, boot.ci.type = "perc", standardized = TRUE)
+
+# and also r2
+lavInspect(over_model, what = "rsquare")
+
+```
+
+lastly visualize
+```{r}
+
+semPaths(over_model, "par",
+             sizeMan = 15, sizeInt = 15, sizeLat = 15,
+             edge.label.cex=1.5,
+             fade=FALSE)
+```
+
+

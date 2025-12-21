@@ -1,0 +1,136 @@
+---
+title: "Assignment"
+author: "Jette"
+date: "2025-12-18"
+output: html_document
+
+
+Initial thoughts
+- there are 3 groups to compare
+- we want to compare if the means of the DV(productivity) differ between the groups (conditions)
+- therefore we can use a one-way ANOVA
+that means we we compute within-group variance and between-group variance and compare them with the F-statistics which calculates the ratio
+- we just want to find out and do not want to predict the DV, so we do not need regression analysis
+- we have more than 2 groups, so we cant perform a t-test
+
+We start of with checking the assumptions
+- Independence of observations: we can assume that the observations are independent, as the participants were randomly assigned to the condition, we can also see based on the ID, that there are different participants for every observations, so there are likely no dependencies
+- we do an inital frequency distribution of the DV, and see a somewhat close to normal distribution, so there are no extrem outliers we have to consider in our analysis
+- Normality: we will perform a shapiro-wilk test on the residuals of the ANOVA later to check for normality
+- Homogeneity of variance: we will perform a levene test later to check for homogeneity
+
+- if any of the assumptions are not met we can choose a non-parametric alternative like the Kruskal-Wallis test
+
+
+---
+```{r, echo = FALSE, warnings=FALSE, message=FALSE}
+  
+#libraries
+library(tidyverse)
+library(psych)
+library(effectsize)
+library(car)
+library(ggpubr)
+library(rstatix)
+```
+```{r}
+#read data
+music_data <- read_csv("SDA/ANOVA/music_data.csv")
+head(music_data)
+```
+
+
+```{r}
+#inspecting the dataset
+str(music_data)
+table(music_data$condition)
+
+#visualize the distribution of the DV
+# that is called a violin plot, it is a combination of a boxplot and a density plot
+p <- ggplot(music_data, aes(y = productivity, x = condition))+
+    geom_violin()
+p
+
+
+# are there NAs? and what ist the distribution of the vars?
+summary(music_data)
+
+music_data %>% 
+  group_by(condition) %>% 
+  summarise(avg = mean(productivity), median(productivity), sd(productivity))
+  
+  
+
+```
+```{r}
+#assumptions
+#independence of observations: fullfilled by design
+#outliers: look at violin plot, no extreme outliers visible
+# if we had outliers we would have to decide if that is due to data entry errors, measurement errors and genius unusal values
+
+#normaility: we will analize the ANOVA mdel residuals
+# or alternatively we could do a shapiro-wilk test for every group
+#build the model
+model <- lm(productivity ~ condition, data = music_data)
+# create a QQ plot of the residuals
+qqnorm(residuals(model)); qqline(residuals(model))
+#shapiro-wilk test
+shapiro.test(residuals(model))
+# we see that the p-value is > 0.05, so we can assume normality
+
+# alternative: check normality for every group
+music_data %>%
+  group_by(condition) %>%
+  shapiro_test(productivity)
+ggqqplot(music_data, "productivity", facet.by = "condition")
+# all p-values are > 0.05, so we can assume normality for every group, and also the graphs show that the data is close to normal
+
+#@Schöggeli, do not report both, but decide for one!
+
+#homogeneity of variance
+plot(model, 1)
+# we do not want to see a pattern in the residuals, so we can assume homogeneity of variance
+# levenes test
+leveneTest(productivity ~ condition, data = music_data)
+# p-value > 0.05, so we can assume homogeneity of variance
+
+```
+So now, that we are sure, that all assumptions are met, we acutally continue and perform the ANOVA.
+```{r}
+#anova
+
+anova <- anova_test(productivity ~ condition, data = music_data)
+anova
+
+anova <- aov(productivity ~ condition, data = music_data)
+summary(anova)
+
+#@schöggeli, these are different ways to perform the ANOVA; not sure wih which you are more familiar.
+
+# in the first output the ges corresponds to the generalized eta squared
+# it measures the proportion of variance explained by the independent variable, in this case the condition
+# ges = 0.12, so 12% of the variance in productivity can be explained by the condition
+
+```
+We see significance so lets perform a post-hoc. We use Tukey, because we want to perform multiple pairwise comparisons between the groups
+
+```{r}
+TukeyHSD(anova)
+```
+
+So we see that the first 2 comparisons are significant, the third is not.
+Lets look also at the effect size of these 1:1 comparisons
+
+```{r}
+
+#pairwise cohens d
+# no music and music choice
+effectsize::t_to_d(t.test(productivity ~ condition, data = filter(music_data, condition %in% c("0","2")))$statistic,
+                   t.test(productivity ~ condition, data = filter(music_data, condition %in% c("0","2")))$parameter)
+
+
+# no music choice and music choice
+effectsize::t_to_d(t.test(productivity ~ condition, data = filter(music_data, condition %in% c("1","2")))$statistic,
+                   t.test(productivity ~ condition, data = filter(music_data, condition %in% c("1","2")))$parameter)
+
+```
