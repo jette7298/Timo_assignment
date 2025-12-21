@@ -50,7 +50,6 @@ Not sure, if you have to do this, but lets also perform a correlation analysis t
 
 climate_data %>%
   select(gov_support, neg_emotion, egal, indv) %>%
-  mutate(across(everything(), as.numeric)) %>%   # important if Likert/factors
   apa.cor.table(
     filename = "correlation_table_regression.doc")
 ```
