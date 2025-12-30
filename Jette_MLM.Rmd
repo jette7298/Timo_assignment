@@ -1,0 +1,151 @@
+---
+title: "Jette_MLM"
+output: html_document
+---
+
+A researcher was interested to know how aggressive behavior changed over time in a sample of children in care.
+measurment: 
+- level of agression at 4 time points
+- level of neglect
+- more neglect = steeper increase?
+
+Justification
+- we can start looking at it in general, but as we have multiple measurments per child, we need to account for that dependency
+- furthermore it is spectaculated, that the initial level of neglect influences the change in aggression over time
+- thus we have a random intercept and a random slope model
+
+```{r}
+#libraries
+library(tidyverse)
+library(lme4)
+library(interactions)
+library(jtools)
+
+```
+
+Load in the data
+
+```{r}
+aggression_long <- read_csv("SDA/MLM/aggression_long.csv")
+head(aggression_long)
+```
+lets get to know the data a bit better
+
+```{r}
+describe(aggression_long)
+summary(aggression_long)
+
+```
+There are some missing values for agression, we will have to deal with that, as that is our outcome variable.
+
+Lets plot the data by level of neglect.
+
+```{r}
+ggplot(aggression_long, aes(x = time, y = agress)) +
+  facet_grid(~ neg) +
+  geom_point() +
+  geom_smooth(method = "lm", se = TRUE) +
+  xlab("Time Point") +
+  ylab("Level of Aggression") +
+  theme(legend.position = "none")
+
+                
+```
+From the plot we can see slightly different baselines. The slopes are a bit steeper for higher level of neglect, but not by much. Something to watch out too is, that for low level of agression there are relatively few observatios, so we might will have to deal with that.
+
+Let's see what the correlation looks like when lumping all levels of neglect together together
+
+```{r}
+
+cor(aggression_long$time, aggression_long$agress, use = "complete.obs")
+```
+There is a relatively strong positive correlation, confirming what we see i the plot and also what the hypothesis is, that agression levels rise with time.
+
+# Regular Reression Model
+
+```{r}
+lm_model <- lm(agress ~ time, data = aggression_long)
+summary(lm_model)
+
+```
+Putting all levels of negelct together in a regular regression, we have a positive, significant effect of time.
+
+```{r}
+median(aggression_long$neg)
+# median is 9
+
+#run 2 regressions for lower and higher levels of neglect
+lm_model_lowneg <- lm(agress ~ time, data = aggression_long %>% filter(neg <=9))
+summary(lm_model_lowneg)
+lm_model_highneg <- lm(agress ~ time, data = aggression_long %>% filter(neg >9))
+summary(lm_model_highneg)
+```
+There is indeed a slightly steeper slope for the high-neglect group.
+But really not by a lot
+
+So honestly from that a MLM seems kind of unnecessary, but let's do it anyway for the sake of learning.
+
+# The Empty Model
+
+```{r}
+empty_model <- lmer(agress ~ 1 + (1 | neg), data = aggression_long, REML = TRUE)
+summary(empty_model)
+```
+The variance component is .041, telling us how much between-neglect variance there is in level of agression. The residual section is 2.66, telling us the variability that is left unexplained in the empty model after the variance attributable to neglect has been subtracted out.
+
+From that we calculate the ICC
+
+```{r}
+icc <- .041 / (.041 + 2.66)
+icc
+```
+The ICC is .015, telling us that only 1.5% of the total variance in agression is accounted for by differences between levels of neglect. This is a really small amount, indicating that neglect does not explain much of the variance in agression.
+
+# Addint the Level 2 Predictor Variable to the Empty Model
+
+```{r}
+set.seed(2025)
+model_with_neg <- lmer(agress ~ 1 + time + (1 + time| neg) + neg, data = aggression_long, REML = FALSE)
+
+
+summary(model_with_neg)
+
+# bootstrap confidence intervals
+confint(model_with_neg, method="boot", nsim=100, oldNames=FALSE)
+
+```
+
+The expected value of happiness for the average child at a average time is 1.99. And for every unit increase in time, agression increases by 1.08 units. This effect is significant. The confidence intervall does not include 0, [1.04, 1.14].
+
+For the random effects, the variance component for the intercept is .01, indicating that there is nearly no variability in agression levels between different levels of neglect after accounting for the fixed effect of time. (but it is significant)
+
+The btw-negelect variability in the slopes of agression. are also minimal (var = 0.0002539)
+
+# plot it
+```{r}
+ggplot(data=aggression_long, aes(x=time, y=agress, group=factor(neg), colour="gray"), legend=FALSE) +
+  geom_smooth(method=lm, se=FALSE, fullrange=FALSE, lty=1, size=.5, color="gray40") +
+  geom_smooth(aes(group=1), method=lm, se=FALSE, fullrange=FALSE, lty=1, size=1, color="blue") +
+  xlab("time") + ylab("Agression") +
+  theme_classic(base_size = 8) +
+  theme(axis.title=element_text(size=18),
+        axis.text=element_text(size=14),
+        plot.title=element_text(size=18, hjust=.5)) +
+  ggtitle("Within-neglect Effect of time on agression")+ 
+geom_vline(xintercept=0)
+```
+# Longitudinal Data: Time Points NEsted within People
+
+Within person relationship bewteen time and agression (for some, only a sample)
+
+```{r}
+ggplot(data=aggression_long[which(aggression_long$id <=300),], aes(x=time,y=agress)) +
+  geom_point() +
+  stat_smooth(method="lm", fullrange=TRUE) +
+  xlab("Time") + ylab("Agression") + 
+  facet_wrap( ~ id) +
+  theme(axis.title=element_text(size=16),
+        axis.text=element_text(size=14),
+        strip.text=element_text(size=14))
+```
+
